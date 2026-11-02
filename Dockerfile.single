@@ -1,0 +1,22 @@
+# Single-stage варіант ЛИШЕ для порівняння розмірів із multi-stage:
+#   docker build -f Dockerfile.single -t kws-api:single .
+FROM python:3.10-slim
+WORKDIR /app
+ARG EPOCHS=10
+ENV MODEL_PATH=/app/artifacts/model.pt PORT=8000 PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends libsndfile1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements-train.txt requirements-api.txt ./
+RUN pip install --no-cache-dir -r requirements-train.txt -r requirements-api.txt
+
+COPY src/ ./src/
+COPY scripts/healthcheck.py ./scripts/healthcheck.py
+
+# датасет і залежності навчання залишаються в образі
+RUN python -m src.data --download --data-root /app/data \
+ && python -m src.train --epochs ${EPOCHS} --seed 42 --data-root /app/data --out /app/artifacts
+
+EXPOSE 8000
+CMD ["sh", "-c", "exec uvicorn src.api:app --host 0.0.0.0 --port ${PORT}"]
