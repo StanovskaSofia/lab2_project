@@ -1,4 +1,3 @@
-"""REST API інференс-сервісу. Конфігурація - через змінні середовища."""
 from __future__ import annotations
 
 import io
@@ -64,7 +63,12 @@ async def lifespan(_: FastAPI):
     STATE.clear()
 
 
-app = FastAPI(title="KWS Audio Classifier", version="1.0.0", lifespan=lifespan)
+app = FastAPI(
+    title="KWS Audio Classifier",
+    description="KWS API - Docker cache experiment",
+    version="1.0.0",
+    lifespan=lifespan,
+)
 app.mount("/metrics", make_asgi_app())
 
 
@@ -93,17 +97,37 @@ def _bad_request(msg: str) -> HTTPException:
 
 @app.post("/predict")
 def predict(file: UploadFile = File(...)):
+    filename = (file.filename or "").lower()
+
+    if not filename.endswith(".wav"):
+        raise HTTPException(
+            status_code=400,
+            detail="Expected a .wav audio file"
+        )
+
     data = file.file.read(MAX_UPLOAD_BYTES + 1)
     if not data:
-        raise _bad_request("Порожній файл")
+        raise HTTPException(status_code=400, detail="Empty file")
+
     if len(data) > MAX_UPLOAD_BYTES:
-        raise _bad_request(f"Файл більший за {MAX_UPLOAD_BYTES} байт")
+        raise HTTPException(
+            status_code=400,
+            detail=f"File is larger than {MAX_UPLOAD_BYTES} bytes"
+        )
+
     try:
         wav, sr = sf.read(io.BytesIO(data), dtype="float32", always_2d=True)
-    except Exception as e:  # некоректний/не-аудіо файл
-        raise _bad_request(f"Не вдалося прочитати аудіо (очікується .wav): {e}") from e
-    if wav.shape[0] == 0 or sr <= 0 or wav.shape[0] / sr > MAX_SECONDS:
-        raise _bad_request(f"Аудіо порожнє або довше за {MAX_SECONDS} с")
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Could not read audio file as WAV: {e}"
+        ) from e
+
+    if wav.size == 0 or sr <= 0 or wav.shape[0] / sr > MAX_SECONDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Audio is empty or longer than {MAX_SECONDS}s"
+        )
 
     # latency: тільки препроцесинг + інференс (декодування файлу не рахується)
     t0 = time.perf_counter()
